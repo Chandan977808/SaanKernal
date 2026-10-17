@@ -9,13 +9,11 @@ GKI kernel for `duchamp` (POCO X6 Pro) — Android 14, Linux 6.1 LTS, with [Baka
 - BBRv3 TCP congestion control (default)
 - NTSYNC (Proton/Wine)
 - DroidSpaces support (PID, IPC, mqueue, binfmt, user namespaces)
-- Two flavors: **GKI** (upstream common kernel) and **AOSP** (kernel used by duchamp AOSP ROMs)
-- Optional **Perf** builds with Wild Kernels performance patches
 
 ## Build Naming
 
 ```
-SaanKernal-<flavor>[-Perf]-<date>.zip
+SaanKernal-GKI-<date>.zip
 ```
 
 ## Installation
@@ -29,6 +27,6 @@ Flashing a kernel is at your own risk. Back up your data and your current `boot.
 ## Credits
 
 - [BakaSU](https://github.com/Baka-SU/BakaSU) — root solution
-- [Wild Kernels](https://github.com/WildKernels) — BBRv3, NTSYNC and performance patches
+- [Wild Kernels](https://github.com/WildKernels) — BBRv3 and NTSYNC patches
 - [DroidSpaces](https://github.com/ravindu644/Droidspaces-OSS)
 - [PigguVerse-Action](https://github.com/handingslider/PigguVerse-Action) — original workflow this repo is based on

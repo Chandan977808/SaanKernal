@@ -30,7 +30,7 @@ Use this if you are not rooted. AOSP custom roms ships with their own **AOSP rec
 2. In AOSP recovery, choose **Apply update → Apply from ADB**.
 3. Sideload the zip:
    ```bash
-   adb sideload SaanKernal-<flavor>-<date>.zip
+   adb sideload SaanKernal-GKI-<date>.zip
    ```
 4. Reboot system.
 

@@ -35,54 +35,27 @@ jobs:
         with:
           path: artifacts
 
-      - name: Prepare Files for Release
+      - name: Prepare Release
         run: |
           set -euo pipefail
+
           mkdir -p release_files
           find artifacts -type f -name '*.zip' -exec cp {} release_files/ \;
-          find release_files -maxdepth 1 -type f -printf '%f\n' | sort
 
-      - name: Detect Kernel Versions
-        run: |
-          set -euo pipefail
+          ZIP="$(find release_files -maxdepth 1 -type f -name 'SaanKernal-GKI-*.zip' | head -n 1)"
+          [ -f "$ZIP" ] || { echo "Missing release ZIP" >&2; exit 1; }
 
-          get_kernel_version() {
-            local zip_file="$1" image_path version
+          IMAGE="$(unzip -Z1 "$ZIP" | grep -E '(^|/)Image$' | head -n 1)"
+          [ -n "$IMAGE" ] || { echo "Image not found in $ZIP" >&2; exit 1; }
 
-            image_path="$(unzip -Z1 "$zip_file" | grep -E '(^|/)Image$' | head -n 1)"
-            if [ -z "$image_path" ]; then
-              echo "Could not find Image inside $zip_file" >&2
-              exit 1
-            fi
-
-            version="$(unzip -p "$zip_file" "$image_path" | strings \
-              | grep -oE 'Linux version [0-9]+\.[0-9]+\.[0-9]+' | head -n 1 \
-              | sed 's/Linux version //')"
-            if [ -z "$version" ]; then
-              echo "Could not detect kernel version from $zip_file" >&2
-              exit 1
-            fi
-
-            echo "$version"
-          }
-
-          pick() { find release_files -maxdepth 1 -type f -name "$1" | head -n 1; }
-
-          AOSP_ZIP="$(pick 'SaanKernal-AOSP-2*.zip')"
-          AOSP_PERF_ZIP="$(pick 'SaanKernal-AOSP-Perf-*.zip')"
-          GKI_ZIP="$(pick 'SaanKernal-GKI-2*.zip')"
-          GKI_PERF_ZIP="$(pick 'SaanKernal-GKI-Perf-*.zip')"
-
-          for z in "$AOSP_ZIP" "$AOSP_PERF_ZIP" "$GKI_ZIP" "$GKI_PERF_ZIP"; do
-            [ -f "$z" ] || { echo "Missing expected release ZIP" >&2; exit 1; }
-          done
+          VERSION="$(unzip -p "$ZIP" "$IMAGE" | strings \
+            | grep -oE 'Linux version [0-9]+\.[0-9]+\.[0-9]+' | head -n 1 \
+            | sed 's/Linux version //')"
+          [ -n "$VERSION" ] || { echo "Could not detect kernel version" >&2; exit 1; }
 
           {
             echo "RELEASE_DATE=$(date -u +'%Y.%m.%d')"
-            echo "AOSP_VERSION=$(get_kernel_version "$AOSP_ZIP")"
-            echo "AOSP_PERF_VERSION=$(get_kernel_version "$AOSP_PERF_ZIP")"
-            echo "GKI_VERSION=$(get_kernel_version "$GKI_ZIP")"
-            echo "GKI_PERF_VERSION=$(get_kernel_version "$GKI_PERF_ZIP")"
+            echo "KERNEL_VERSION=$VERSION"
           } >> "$GITHUB_ENV"
 
       - name: Create Release
@@ -96,12 +69,9 @@ jobs:
 
             GKI kernel for **duchamp** (POCO X6 Pro) with BakaSU root.
 
-            | Build | Kernel Version |
+            | Item | Value |
             | --- | --- |
-            | SaanKernal-AOSP | Linux ${{ env.AOSP_VERSION }} |
-            | SaanKernal-AOSP + Perf | Linux ${{ env.AOSP_PERF_VERSION }} |
-            | SaanKernal-GKI | Linux ${{ env.GKI_VERSION }} |
-            | SaanKernal-GKI + Perf | Linux ${{ env.GKI_PERF_VERSION }} |
+            | Kernel | Linux ${{ env.KERNEL_VERSION }} |
 
             ### Root Manager
 

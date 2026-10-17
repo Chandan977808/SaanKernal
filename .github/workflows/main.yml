@@ -11,19 +11,15 @@ env:
   NAME: SaanKernal
   ANYKERNEL3_REPO: https://github.com/handingslider/AnyKernel3
   ANYKERNEL3_BRANCH: master
+  KERNEL_SOURCE: common
   # BakaSU commit to build (full SHA, bump manually). Tested: Baka-SU/BakaSU main @ 2026-10-17
   KSU_REF: 2489b38582a08fee7b586d05185da5e5d12c6a5c
 
 jobs:
   build:
-    name: Build (${{ matrix.variant }}${{ matrix.perf && '-Perf' || '' }})
+    name: Build GKI
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [GKI, AOSP]
-        perf: [false, true]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -38,7 +34,7 @@ jobs:
           KERNEL_ROOT=$KERNEL_ROOT
           ANYKERNEL3=$GITHUB_WORKSPACE/AnyKernel3
           WILD_PATCHES=$GITHUB_WORKSPACE/kernel_patches
-          ZIP_NAME=${NAME}-${{ matrix.variant }}${{ matrix.perf && '-Perf' || '' }}
+          ZIP_NAME=${NAME}-GKI
           EOF
 
           mkdir -p "$GITHUB_WORKSPACE/git-repo"
@@ -73,18 +69,7 @@ jobs:
         working-directory: ${{ env.KERNEL_ROOT }}
         run: |
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts --repo-rev=v2.16 --depth=1
-          if [[ "${{ matrix.variant }}" == "AOSP" ]]; then
-            git clone https://github.com/mt6897-devs/kernel_manifest .repo/local_manifests
-          fi
           repo --trace sync -c -j$(nproc --all) --fail-fast --no-tags --force-sync --no-clone-bundle
-
-      - name: Set Kernel Source Directory
-        run: |
-          if [[ "${{ matrix.variant }}" == "AOSP" ]]; then
-            echo "KERNEL_SOURCE=kernel-6.1" >> "$GITHUB_ENV"
-          else
-            echo "KERNEL_SOURCE=common" >> "$GITHUB_ENV"
-          fi
 
       - name: Get Kernel Version
         id: get-version
@@ -101,7 +86,7 @@ jobs:
         with:
           cache_path: /home/runner/.cache/bazel
           cache_key: duchamp-${{ steps.get-version.outputs.version }}
-          cache_bucket: bazel-cache-duchamp-${{ matrix.variant }}${{ matrix.perf && '-perf' || '' }}
+          cache_bucket: bazel-cache-duchamp-GKI
           restore_keys: |
             duchamp-
 
@@ -176,34 +161,6 @@ jobs:
             CONFIG_BINFMT_ELF=y
             CONFIG_USER_NS=y
 
-      - name: Add Wild performance patches
-        if: matrix.perf == true
-        working-directory: ${{ env.KERNEL_ROOT }}/${{ env.KERNEL_SOURCE }}
-        run: |
-          for p in disable_cache_hot_buddy mem_opt_prefetch optimise_memcmp \
-             optimized_mem_operations file_struct_8bytes_align reduce_cache_pressure \
-             f2fs_reduce_congestion f2fs_enlarge_min_fsync_blocks reduce_gc_thread_sleep_time \
-             minimise_wakeup_time int_sqrt add_timeout_wakelocks_globally reduce_freeze_timeout \
-             increase_ext4_default_commit_age increase_sk_mem_packets reduce_pci_pme_wakeups \
-             silence_irq_cpu_logspam silence_system_logspam; do
-            patch -p1 -F3 --no-backup-if-mismatch < "$WILD_PATCHES/common/${p}.patch" \
-              || echo "::warning::perf patch failed: $p"
-          done
-
-          sed -e 's/SYM_FUNC_START_PI(clear_page)/SYM_FUNC_START_PI(__pi_clear_page)/' \
-            "$WILD_PATCHES/common/clear_page_16bytes_align.patch" \
-            | patch -p1 -F3 --no-backup-if-mismatch \
-            || echo "::warning::perf patch failed: clear_page_16bytes_align"
-
-          FILE="drivers/base/power/wakeup.c"
-          if grep -q "^void pm_system_wakeup(void)" "$FILE"; then
-            if sed -n '/^void pm_system_wakeup(void)/,/^}/p' "$FILE" | grep -q 'suspend_abort_fs_sync();'; then
-              sed -i '/^void pm_system_wakeup(void)/,/^}/{/suspend_abort_fs_sync();/d}' "$FILE"
-            fi
-          fi
-          patch -p1 -F3 --no-backup-if-mismatch < "$WILD_PATCHES/common/avoid_extra_s2idle_wake_attempts.patch" \
-            || echo "::warning::perf patch failed: avoid_extra_s2idle_wake_attempts"
-
       - name: Configuration
         uses: ./.github/actions/set-kernel-config
         with:
@@ -265,7 +222,7 @@ jobs:
         with:
           cache_path: /home/runner/.cache/bazel
           cache_key: duchamp-${{ steps.get-version.outputs.version }}
-          cache_bucket: bazel-cache-duchamp-${{ matrix.variant }}${{ matrix.perf && '-perf' || '' }}
+          cache_bucket: bazel-cache-duchamp-GKI
           compression_level: 9
           github_token: ${{ github.token }}
 
