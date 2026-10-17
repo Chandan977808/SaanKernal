@@ -63,3 +63,15 @@ Use this if you only have a `boot.img` from your current ROM and can flash via f
 7. Reboot.
 
 ---
+
+---
+
+## Root Manager
+
+After flashing, install a manager app to use root:
+
+| Manager | Link |
+|---------|------|
+| **BakaSU** | [Latest release](https://github.com/Baka-SU/BakaSU/releases/latest) |
+
+The kernel also accepts the official KernelSU manager (multi-manager support).

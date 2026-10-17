@@ -11,6 +11,8 @@ env:
   NAME: SaanKernal
   ANYKERNEL3_REPO: https://github.com/handingslider/AnyKernel3
   ANYKERNEL3_BRANCH: master
+  # BakaSU commit to build (full SHA, bump manually). Tested: Baka-SU/BakaSU main @ 2026-10-17
+  KSU_REF: 2489b38582a08fee7b586d05185da5e5d12c6a5c
 
 jobs:
   build:
@@ -102,6 +104,19 @@ jobs:
           cache_bucket: bazel-cache-duchamp-${{ matrix.variant }}${{ matrix.perf && '-perf' || '' }}
           restore_keys: |
             duchamp-
+
+      - name: Add BakaSU
+        working-directory: ${{ env.KERNEL_ROOT }}/${{ env.KERNEL_SOURCE }}
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/Baka-SU/BakaSU/${KSU_REF}/kernel/setup.sh" | bash -s -- "$KSU_REF"
+
+      - name: Enable BakaSU config
+        uses: ./.github/actions/set-kernel-config
+        with:
+          kernel_dir: ${{ env.KERNEL_ROOT }}/${{ env.KERNEL_SOURCE }}
+          config_list: |
+            CONFIG_KSU=y
+            CONFIG_KSU_TRACEPOINT_HOOK=y
 
       - name: Add backported BBRv3
         working-directory: ${{ env.KERNEL_ROOT }}/${{ env.KERNEL_SOURCE }}
@@ -209,6 +224,13 @@ jobs:
         run: |
           fail=0
           check() { grep -q -- "$2" "$3" || { echo "::error::$1 missing ($2 not in $3)"; fail=1; }; }
+          [ -L drivers/kernelsu ] && [ -f drivers/kernelsu/Kconfig ] || { echo "::error::BakaSU symlink missing"; fail=1; }
+          [ -e KernelSU/.git ] || { echo "::error::KernelSU/.git missing (Kbuild requires it)"; fail=1; }
+          [ "$(git -C KernelSU rev-parse HEAD)" = "$KSU_REF" ] || { echo "::error::BakaSU not at pinned ref $KSU_REF"; fail=1; }
+          check "BakaSU Makefile" 'kernelsu/' drivers/Makefile
+          check "BakaSU Kconfig"  'drivers/kernelsu/Kconfig' drivers/Kconfig
+          check "KSU config"      '^CONFIG_KSU=y$' arch/arm64/configs/gki_defconfig
+          check "KSU hook"        '^CONFIG_KSU_TRACEPOINT_HOOK=y$' arch/arm64/configs/gki_defconfig
           check "BBRv3 patch"   'config TCP_CONG_BBR3' net/ipv4/Kconfig
           check "NTSYNC patch"  'config NTSYNC' drivers/misc/Kconfig
           check "BBRv3 default" '^CONFIG_DEFAULT_TCP_CONG="bbr3"$' arch/arm64/configs/gki_defconfig

@@ -94,7 +94,7 @@ jobs:
           body: |
             ## SaanKernal — ${{ env.RELEASE_DATE }}
 
-            Vanilla GKI kernel for **duchamp** (POCO X6 Pro). No root integration.
+            GKI kernel for **duchamp** (POCO X6 Pro) with BakaSU root.
 
             | Build | Kernel Version |
             | --- | --- |
@@ -102,6 +102,10 @@ jobs:
             | SaanKernal-AOSP + Perf | Linux ${{ env.AOSP_PERF_VERSION }} |
             | SaanKernal-GKI | Linux ${{ env.GKI_VERSION }} |
             | SaanKernal-GKI + Perf | Linux ${{ env.GKI_PERF_VERSION }} |
+
+            ### Root Manager
+
+            - [BakaSU](https://github.com/Baka-SU/BakaSU/releases/latest)
 
             ### Recent Changes
 
