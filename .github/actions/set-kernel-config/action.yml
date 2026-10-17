@@ -1,0 +1,64 @@
+# Adapted from WildKernels/GKI_KernelSU_SUSFS (credit: WildKernels / TheWildJames)
+# Changes: config_list is passed via env and lines are trimmed with sed,
+# so quoted string values (e.g. CONFIG_LOCALVERSION="-X") keep their quotes.
+
+name: Set Kernel Config
+description: Patch gki_defconfig directly (add or modify entries)
+
+inputs:
+  kernel_dir:
+    required: false
+    default: ${{ github.workspace }}/kernel/common
+    description: "Kernel source directory containing arch/arm64/configs/gki_defconfig"
+  config_list:
+    required: true
+    description: "Kernel config lines"
+
+runs:
+  using: composite
+  steps:
+  - name: Patch gki_defconfig
+    shell: bash
+    working-directory: ${{ inputs.kernel_dir }}
+    env:
+      CONFIG_LIST: ${{ inputs.config_list }}
+    run: |
+      set -euo pipefail
+
+      DEFCONFIG="arch/arm64/configs/gki_defconfig"
+
+      if [ ! -f "$DEFCONFIG" ]; then
+        echo "ERROR: gki_defconfig not found"
+        exit 1
+      fi
+
+      apply_line() {
+        local line
+        line="$(printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+        # skip empty/comments
+        [[ -z "$line" || "$line" == \#* ]] && return
+
+        local key value
+        if [[ "$line" == *"="* ]]; then
+          key="${line%%=*}"
+          value="${line#*=}"
+        else
+          key="$line"
+          value="y"
+        fi
+
+        echo "Processing: $key=$value"
+
+        if grep -q "^$key=" "$DEFCONFIG"; then
+          sed -i "s|^$key=.*|$key=$value|" "$DEFCONFIG"
+        elif grep -q "^# $key is not set" "$DEFCONFIG"; then
+          sed -i "s|^# $key is not set|$key=$value|" "$DEFCONFIG"
+        else
+          echo "$key=$value" >> "$DEFCONFIG"
+        fi
+      }
+
+      while IFS= read -r line || [ -n "$line" ]; do
+        apply_line "$line"
+      done <<< "$CONFIG_LIST"

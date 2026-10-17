@@ -1,0 +1,112 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: ./.github/workflows/main.yml
+    permissions:
+      contents: write
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 20
+
+      - name: Generate Changelog
+        run: |
+          {
+            echo 'CHANGELOG<<CHANGELOG_EOF'
+            git log -10 --no-merges --pretty=format:'- %s (%h)'
+            echo ''
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_ENV"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare Files for Release
+        run: |
+          set -euo pipefail
+          mkdir -p release_files
+          find artifacts -type f -name '*.zip' -exec cp {} release_files/ \;
+          find release_files -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Detect Kernel Versions
+        run: |
+          set -euo pipefail
+
+          get_kernel_version() {
+            local zip_file="$1" image_path version
+
+            image_path="$(unzip -Z1 "$zip_file" | grep -E '(^|/)Image$' | head -n 1)"
+            if [ -z "$image_path" ]; then
+              echo "Could not find Image inside $zip_file" >&2
+              exit 1
+            fi
+
+            version="$(unzip -p "$zip_file" "$image_path" | strings \
+              | grep -oE 'Linux version [0-9]+\.[0-9]+\.[0-9]+' | head -n 1 \
+              | sed 's/Linux version //')"
+            if [ -z "$version" ]; then
+              echo "Could not detect kernel version from $zip_file" >&2
+              exit 1
+            fi
+
+            echo "$version"
+          }
+
+          pick() { find release_files -maxdepth 1 -type f -name "$1" | head -n 1; }
+
+          AOSP_ZIP="$(pick 'SaanKernal-AOSP-2*.zip')"
+          AOSP_PERF_ZIP="$(pick 'SaanKernal-AOSP-Perf-*.zip')"
+          GKI_ZIP="$(pick 'SaanKernal-GKI-2*.zip')"
+          GKI_PERF_ZIP="$(pick 'SaanKernal-GKI-Perf-*.zip')"
+
+          for z in "$AOSP_ZIP" "$AOSP_PERF_ZIP" "$GKI_ZIP" "$GKI_PERF_ZIP"; do
+            [ -f "$z" ] || { echo "Missing expected release ZIP" >&2; exit 1; }
+          done
+
+          {
+            echo "RELEASE_DATE=$(date -u +'%Y.%m.%d')"
+            echo "AOSP_VERSION=$(get_kernel_version "$AOSP_ZIP")"
+            echo "AOSP_PERF_VERSION=$(get_kernel_version "$AOSP_PERF_ZIP")"
+            echo "GKI_VERSION=$(get_kernel_version "$GKI_ZIP")"
+            echo "GKI_PERF_VERSION=$(get_kernel_version "$GKI_PERF_ZIP")"
+          } >> "$GITHUB_ENV"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release_files/*
+          tag_name: build-${{ github.run_id }}
+          name: SaanKernal ${{ env.RELEASE_DATE }}
+          body: |
+            ## SaanKernal — ${{ env.RELEASE_DATE }}
+
+            Vanilla GKI kernel for **duchamp** (POCO X6 Pro). No root integration.
+
+            | Build | Kernel Version |
+            | --- | --- |
+            | SaanKernal-AOSP | Linux ${{ env.AOSP_VERSION }} |
+            | SaanKernal-AOSP + Perf | Linux ${{ env.AOSP_PERF_VERSION }} |
+            | SaanKernal-GKI | Linux ${{ env.GKI_VERSION }} |
+            | SaanKernal-GKI + Perf | Linux ${{ env.GKI_PERF_VERSION }} |
+
+            ### Recent Changes
+
+            ${{ env.CHANGELOG }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
