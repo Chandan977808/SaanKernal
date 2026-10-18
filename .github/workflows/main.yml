@@ -12,8 +12,10 @@ env:
   ANYKERNEL3_REPO: https://github.com/handingslider/AnyKernel3
   ANYKERNEL3_BRANCH: master
   KERNEL_SOURCE: common
-  # BakaSU commit to build (full SHA, bump manually). Tested: Baka-SU/BakaSU main @ 2026-10-17
-  KSU_REF: 2489b38582a08fee7b586d05185da5e5d12c6a5c
+  # BakaSU commit to build (full SHA, bump manually).
+  # Pinned before 48fa4bb7 ("suspend susfs build"): newer BakaSU refuses to build with SUSFS
+  # until simonpunk's SUSFS syncs with the latest KernelSU (selinux_hide changes).
+  KSU_REF: 9dbce02e511ea6b6305a238b84e456f6a92e1d0b
 
 jobs:
   build:
@@ -79,6 +81,7 @@ jobs:
           PATCHLEVEL=$(grep -E "^PATCHLEVEL =" Makefile | head -n 1 | awk '{print $3}')
           SUBLEVEL=$(grep -E "^SUBLEVEL =" Makefile | head -n 1 | awk '{print $3}')
           echo "version=${VERSION}.${PATCHLEVEL}.${SUBLEVEL}" >> "$GITHUB_OUTPUT"
+          echo "SUBLEVEL=${SUBLEVEL}" >> "$GITHUB_ENV"
 
       - name: Restore Bazel Cache
         continue-on-error: true
@@ -95,13 +98,67 @@ jobs:
         run: |
           curl -fsSL "https://raw.githubusercontent.com/Baka-SU/BakaSU/${KSU_REF}/kernel/setup.sh" | bash -s -- "$KSU_REF"
 
+      - name: Integrate SUSFS
+        working-directory: ${{ env.KERNEL_ROOT }}/${{ env.KERNEL_SOURCE }}
+        run: |
+          cp "$GITHUB_WORKSPACE/susfs/kernel_patches/fs/"* fs/
+          cp "$GITHUB_WORKSPACE/susfs/kernel_patches/include/linux/"* include/linux/
+
+          if [ "$SUBLEVEL" -le "25" ]; then
+            echo "Fake patch: base.c <=25"
+            sed -i '/^#include <trace\/events\/oom.h>$/a #include <trace/hooks/sched.h>' fs/proc/base.c
+          fi
+          if [ "$SUBLEVEL" -le "141" ]; then
+            echo "Fake patch: base.c <=141"
+            sed -i '/^#include <linux\/cpufreq_times.h>$/a #include <linux/dma-buf.h>' fs/proc/base.c
+          fi
+          if [ "$SUBLEVEL" -ge "157" ]; then
+            echo "Fake patch: namespace.c >=157"
+            sed -i '/^#include <trace\/hooks\/blk.h>$/d' fs/namespace.c
+            echo "Applying super.c Android 14 6.1 Fake Patch"
+            sed -i '/^#include <trace\/hooks\/fs.h>$/,+1 d' fs/super.c
+          fi
+
+          patch -p1 --no-backup-if-mismatch < "$GITHUB_WORKSPACE/susfs/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch"
+
+          if grep -q 'VMA_PAD_START(' fs/proc/task_mmu.c && ! grep -qE '#include <linux/pgsize_migration(_inline)?\.h>|define VMA_PAD_START' fs/proc/task_mmu.c; then
+            sed -i '1a #ifndef VMA_PAD_START\n#define VMA_PAD_START(vma) ((vma)->vm_end)\n#endif' fs/proc/task_mmu.c
+          fi
+          if grep -q '__fold_filemap_fixup_entry' fs/proc/task_mmu.c && ! grep -q '#include <linux/page_size_compat.h>' fs/proc/task_mmu.c; then
+            sed -i '/#include <linux\/pkeys.h>/a #include <linux/page_size_compat.h>' fs/proc/task_mmu.c
+          fi
+
+      - name: Revert SUSFS Fake Patches
+        working-directory: ${{ env.KERNEL_ROOT }}/${{ env.KERNEL_SOURCE }}
+        run: |
+          if [ "$SUBLEVEL" -le "25" ]; then
+            sed -i '/^#include <trace\/hooks\/sched.h>$/d' fs/proc/base.c
+          fi
+          if [ "$SUBLEVEL" -le "141" ]; then
+            sed -i '/^#include <linux\/dma-buf.h>$/d' fs/proc/base.c
+          fi
+          if [ "$SUBLEVEL" -ge "157" ]; then
+            sed -i '/^#include "internal.h"$/a #include <trace/hooks/blk.h>' fs/namespace.c
+            echo "Reverting super.c Android 14 6.1 Fake Patch"
+            sed -i '/^#include "internal.h"$/a #include <trace/hooks/fs.h>' fs/super.c
+          fi
+
       - name: Enable BakaSU config
         uses: ./.github/actions/set-kernel-config
         with:
           kernel_dir: ${{ env.KERNEL_ROOT }}/${{ env.KERNEL_SOURCE }}
           config_list: |
             CONFIG_KSU=y
-            CONFIG_KSU_TRACEPOINT_HOOK=y
+            CONFIG_KSU_SUSFS=y
+            CONFIG_KSU_SUSFS_SUS_PATH=y
+            CONFIG_KSU_SUSFS_SUS_MOUNT=y
+            CONFIG_KSU_SUSFS_SUS_KSTAT=y
+            CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+            CONFIG_KSU_SUSFS_ENABLE_LOG=y
+            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+            CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+            CONFIG_KSU_SUSFS_SUS_MAP=y
 
       - name: Add backported BBRv3
         working-directory: ${{ env.KERNEL_ROOT }}/${{ env.KERNEL_SOURCE }}
@@ -187,7 +244,14 @@ jobs:
           check "BakaSU Makefile" 'kernelsu/' drivers/Makefile
           check "BakaSU Kconfig"  'drivers/kernelsu/Kconfig' drivers/Kconfig
           check "KSU config"      '^CONFIG_KSU=y$' arch/arm64/configs/gki_defconfig
-          check "KSU hook"        '^CONFIG_KSU_TRACEPOINT_HOOK=y$' arch/arm64/configs/gki_defconfig
+          check "SUSFS config"    '^CONFIG_KSU_SUSFS=y$' arch/arm64/configs/gki_defconfig
+          check "SUSFS sus_mount" '^CONFIG_KSU_SUSFS_SUS_MOUNT=y$' arch/arm64/configs/gki_defconfig
+          check "SUSFS source"    'SUSFS_VERSION' include/linux/susfs.h
+          check "SUSFS Makefile"  'CONFIG_KSU_SUSFS) += susfs.o' fs/Makefile
+          check "SUSFS exec hook" 'ksu_handle_execveat' fs/exec.c
+          check "SUSFS selinux hook" 'ksu_selinux_hide_running' security/selinux/hooks.c
+          ! grep -q '^CONFIG_KSU_TRACEPOINT_HOOK=y$' arch/arm64/configs/gki_defconfig || { echo "::error::tracepoint hook conflicts with SUSFS"; fail=1; }
+          [ -z "$(find . -name '*.rej' -print -quit)" ] || { echo "::error::patch rejects found"; find . -name '*.rej'; fail=1; }
           check "BBRv3 patch"   'config TCP_CONG_BBR3' net/ipv4/Kconfig
           check "NTSYNC patch"  'config NTSYNC' drivers/misc/Kconfig
           check "BBRv3 default" '^CONFIG_DEFAULT_TCP_CONG="bbr3"$' arch/arm64/configs/gki_defconfig

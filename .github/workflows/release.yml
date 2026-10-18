@@ -67,7 +67,7 @@ jobs:
           body: |
             ## SaanKernal — ${{ env.RELEASE_DATE }}
 
-            GKI kernel for **duchamp** (POCO X6 Pro) with BakaSU root.
+            GKI kernel for **duchamp** (POCO X6 Pro) with BakaSU root and SUSFS.
 
             | Item | Value |
             | --- | --- |
